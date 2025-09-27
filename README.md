@@ -1,0 +1,1 @@
+# solidals-api
