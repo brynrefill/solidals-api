@@ -7,7 +7,10 @@ Contact: info@brynrefill.com
 
 from flask import Flask, jsonify, request
 import hashlib
+import math
 import requests
+import secrets
+import string
 
 app = Flask(__name__)
 
@@ -18,22 +21,63 @@ def doc():
     return jsonify({
         "name": "Solidals API",
         "endpoints": {
-            "GET /": "API documentation",
-            "POST /check-password": "Check if a password has been found in known data breaches",
-            "...": "..."
+            " GET /": "API documentation"
+            # TODO: add Swagger documentation
         }
     })
 
-@app.route('/check-password', methods=['POST'])
-def check_password():
-    """Check password endpoint"""
+@app.route('/gen-password', methods=['GET'])
+def gen_password():
+    try:
+        length = 16 # default length
+        length_arg = request.args.get('l')
+
+        if length_arg:
+            length = int(length_arg)
+
+        if length < 12 or length > 128:
+            raise ValueError
+
+        # set of available chars
+        alphabet = string.ascii_letters + string.digits + string.punctuation
+
+        # ensure password includes at least one of each type in alphabet
+        password = [
+            secrets.choice(string.ascii_lowercase),
+            secrets.choice(string.ascii_uppercase),
+            secrets.choice(string.digits),
+            secrets.choice(string.punctuation)
+        ]
+
+        password += [secrets.choice(alphabet) for _ in range(length - 4)]
+
+        # shuffle to avoid a predictable pattern
+        secrets.SystemRandom().shuffle(password)
+
+        password = ''.join(password)
+
+        # password entropy estimation (in bits):
+        # entropy_bits = log2(chars_range ^ length) = length * log2(chars_range)
+        # max number of combinations/passwords to try to guess a password = 2 ^ (entropy_bits)
+
+        chars_range = len(string.ascii_letters) + len(string.digits) + len(string.punctuation)
+        entropy_bits = round(length * math.log2(chars_range), 2)
+
+        return jsonify({
+            "password": password,
+            "entropy": entropy_bits
+            # TODO: add time to crack the password
+        })
+
+    # to handle also the case where the user send something different than a number
+    except ValueError as e:
+        return jsonify({"error": "Password length must be between 12 and 128 characters!"}), 400
+
+@app.route('/check-breach', methods=['POST'])
+def check_breach():
+    """Check breach endpoint"""
     password = request.form.get('p') # reading data assuming that the POST data is sent as
                                      # form data (application/x-www-form-urlencoded or multipart/form-data)
-    result = is_breached(password)
-    return result
-
-def is_breached(password):
-    """ Check if a password has been found in known data breaches """
     if not password:
         return jsonify({"error": f"Parameter 'p' is required!"}), 400 # bad request status code
 
@@ -45,7 +89,6 @@ def is_breached(password):
     suffix = hash[5:]
 
     # query HIBP API:
-    # GET https://api.pwnedpasswords.com/range/{first_5_hash_chars}
     url = f"https://api.pwnedpasswords.com/range/{prefix}"
     res = requests.get(url)
 
@@ -103,22 +146,16 @@ def is_breached(password):
 def not_found(error):
     return jsonify({"error": "Endpoint not found!"}), 404
 
+# TODO: add all the necessary server errors handles
+
 def main():
     print("x------------------------------------------------------------------------+")
     print("| Starting Solidals API...                                               |")
     print("| Example usage:                                                         |")
     print("|    curl -X  GET http://localhost:5000/                                 |")
-    print("|    curl -X POST http://localhost:5000/check-password -d \"p=hello\"      |")
+    print("|    curl -X  GET http://localhost:5000/gen-password?l=42                |")
+    print("|    curl -X POST http://localhost:5000/check-breach -d \"p=hello\"        |")
     print("o------------------------------------------------------------------------/")
-
-    '''
-    e.g.
-    $ curl -X POST -d "p=hello" http://localhost:5000/check-password
-    {
-    "breached": true,
-    "count": 403640
-    }
-    '''
 
 if __name__ == '__main__':
     main()
